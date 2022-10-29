@@ -1,0 +1,215 @@
+# SECRETS MANAGER -----------------------------------------------------------------------
+apiVersion: secretsmanager.aws.upbound.io/v1beta1
+kind: Secret
+metadata:
+  name: mydbsecret
+spec:
+  forProvider:
+    region: us-west-2
+    name: mydbsecret
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mydbsecret
+  namespace: default
+type: Opaque
+data:
+  password: dGVzdFBhc3N3b3JkITEyMw== # testPassword!123
+
+# RDS -----------------------------------------------------------------------------------
+---
+apiVersion: rds.aws.upbound.io/v1beta1
+kind: SubnetGroup
+metadata:
+  name: mydbsubnetgroup
+spec:
+  forProvider:
+    region: us-west-2
+    subnetIds:
+      - subnet-0
+      - subnet-1
+      - subnet-3
+---
+apiVersion: rds.aws.upbound.io/v1beta1
+kind: Cluster
+metadata:
+  name: mydbcluster
+  namespace: default
+spec:
+  forProvider:
+    region: us-west-2
+    engine: aurora-mysql
+    engineVersion: 5.7.mysql_aurora.2.10.2
+    masterUsername: dbarede
+    masterPasswordSecretRef:
+      name: mydbsecret
+      namespace: default
+      key: password
+    databaseName: mydb
+    skipFinalSnapshot: true
+    applyImmediately: true
+    availabilityZones:
+      - us-west-2a
+      - us-west-2b
+      - us-west-2d
+    dbSubnetGroupNameRef:
+      name: mydbsubnetgroup
+  writeConnectionSecretToRef:
+    name: mydbclustersecret
+    namespace: default
+---
+apiVersion: rds.aws.upbound.io/v1beta1
+kind: ClusterInstance
+metadata:
+  name: mydbinstance
+spec:
+  forProvider:
+    clusterIdentifierRef:
+      name: mydbcluster
+    engine: aurora-mysql
+    instanceClass: db.t3.small
+    region: us-west-2
+
+# RDS PROXY -----------------------------------------------------------------------------
+---
+apiVersion: rds.aws.upbound.io/v1beta1
+kind: Proxy
+metadata:
+  name: mydbproxy
+spec:
+  forProvider:
+    auth:
+      - authScheme: SECRETS
+        description: example
+        iamAuth: DISABLED
+        secretArnRef:
+          name: mydbsecret
+    debugLogging: false
+    engineFamily: MYSQL
+    idleClientTimeout: 1800
+    region: us-west-2
+    requireTls: true
+    roleArnRef:
+      name: mydbproxyrole
+    tags:
+      Key: value
+      Name: example
+    vpcSubnetIds:
+      - subnet-0
+      - subnet-1
+      - subnet-2
+---
+apiVersion: rds.aws.upbound.io/v1beta1
+kind: ProxyDefaultTargetGroup
+metadata:
+  name: mydbptg
+spec:
+  forProvider:
+    connectionPoolConfig:
+      - connectionBorrowTimeout: 120
+        initQuery: SET x=1, y=2
+        maxConnectionsPercent: 100
+        maxIdleConnectionsPercent: 50
+        sessionPinningFilters:
+          - EXCLUDE_VARIABLE_SETS
+    dbProxyNameRef:
+      name: mydbproxy
+    region: us-west-2
+---
+apiVersion: rds.aws.upbound.io/v1beta1
+kind: ProxyTarget
+metadata:
+  name: mydbpt
+spec:
+  forProvider:
+    dbClusterIdentifier: mydbcluster
+    dbProxyNameRef:
+      name: mydbproxy
+    region: us-west-2
+    targetGroupName: default
+
+# ROLE / POLICY -------------------------------------------------------------------------
+---
+apiVersion: iam.aws.upbound.io/v1beta1
+kind: Role
+metadata:
+  name: mydbproxyrole
+spec:
+  forProvider:
+    assumeRolePolicy: |
+      {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": {
+              "Service": "eks.amazonaws.com"
+            },
+            "Action": "sts:AssumeRole"
+          }
+        ]
+      }
+---
+apiVersion: iam.aws.upbound.io/v1beta1
+kind: RolePolicyAttachment
+metadata:
+  name: mydbrolepolicy
+spec:
+  forProvider:
+    policyArnRef:
+      name: mydbpolicy
+    roleRef:
+      name: mydbproxyrole
+---
+apiVersion: iam.aws.upbound.io/v1beta1
+kind: Policy
+metadata:
+  name: mydbpolicy
+spec:
+  forProvider:
+    policy: |
+      {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Sid": "SecretsManagerDbCredentialsAccess",
+              "Effect": "Allow",
+              "Action": [
+                "secretsmanager:GetSecretValue",
+                "secretsmanager:PutResourcePolicy",
+                "secretsmanager:PutSecretValue",
+                "secretsmanager:DeleteSecret",
+                "secretsmanager:DescribeSecret",
+                "secretsmanager:TagResource"
+              ],
+              "Resource": "arn:aws:secretsmanager:*:*:secret:rds-db-credentials/*"
+            },
+            {
+              "Sid": "RDSDataServiceAccess",
+              "Effect": "Allow",
+              "Action": [
+                "dbqms:CreateFavoriteQuery",
+                "dbqms:DescribeFavoriteQueries",
+                "dbqms:UpdateFavoriteQuery",
+                "dbqms:DeleteFavoriteQueries",
+                "dbqms:GetQueryString",
+                "dbqms:CreateQueryHistory",
+                "dbqms:DescribeQueryHistory",
+                "dbqms:UpdateQueryHistory",
+                "dbqms:DeleteQueryHistory",
+                "rds-data:ExecuteSql",
+                "rds-data:ExecuteStatement",
+                "rds-data:BatchExecuteStatement",
+                "rds-data:BeginTransaction",
+                "rds-data:CommitTransaction",
+                "rds-data:RollbackTransaction",
+                "secretsmanager:CreateSecret",
+                "secretsmanager:ListSecrets",
+                "secretsmanager:GetRandomPassword",
+                "tag:GetResources"
+              ],
+              "Resource": "*"
+            }
+          ]
+      }
