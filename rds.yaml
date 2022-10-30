@@ -27,9 +27,9 @@ spec:
   forProvider:
     region: us-west-2
     subnetIds:
-      - subnet-0
-      - subnet-1
-      - subnet-3
+      - subnet-058fa11a5367b2460
+      - subnet-0817daf9e323b816f
+      - subnet-0d3fc18f89fff0988
 ---
 apiVersion: rds.aws.upbound.io/v1beta1
 kind: Cluster
@@ -96,9 +96,9 @@ spec:
       Key: value
       Name: example
     vpcSubnetIds:
-      - subnet-0
-      - subnet-1
-      - subnet-2
+      - subnet-058fa11a5367b2460
+      - subnet-0817daf9e323b816f
+      - subnet-0d3fc18f89fff0988
 ---
 apiVersion: rds.aws.upbound.io/v1beta1
 kind: ProxyDefaultTargetGroup
